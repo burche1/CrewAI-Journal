@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "MacroTarget": {
+      "properties": {
+        "kcal": {
+          "exclusiveMinimum": 0,
+          "maximum": 10000,
+          "title": "Kcal",
+          "type": "number"
+        },
+        "protein_g": {
+          "exclusiveMinimum": 0,
+          "maximum": 500,
+          "title": "Protein G",
+          "type": "number"
+        },
+        "carbs_g": {
+          "maximum": 1500,
+          "minimum": 0,
+          "title": "Carbs G",
+          "type": "number"
+        },
+        "fat_g": {
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Fat G",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kcal",
+        "protein_g",
+        "carbs_g",
+        "fat_g"
+      ],
+      "title": "MacroTarget",
+      "type": "object"
+    },
+    "PersonProfile": {
+      "properties": {
+        "label": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "use_journal_training": {
+          "default": false,
+          "title": "Use Journal Training",
+          "type": "boolean"
+        },
+        "targets_by_load": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MacroTarget"
+          },
+          "title": "Targets By Load",
+          "type": "object"
+        }
+      },
+      "required": [
+        "label",
+        "targets_by_load"
+      ],
+      "title": "PersonProfile",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "people": {
+      "additionalProperties": {
+        "$ref": "#/$defs/PersonProfile"
+      },
+      "title": "People",
+      "type": "object"
+    },
+    "verified_by_user": {
+      "default": false,
+      "title": "Verified By User",
+      "type": "boolean"
+    },
+    "notes": {
+      "default": "",
+      "title": "Notes",
+      "type": "string"
+    }
+  },
+  "required": [
+    "people"
+  ],
+  "title": "NutritionProfiles",
+  "type": "object"
+}

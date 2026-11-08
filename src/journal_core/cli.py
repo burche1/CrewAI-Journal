@@ -13,6 +13,8 @@ from .training_parser import load_training
 from .weekly import CATEGORIES, create_menu, day_menu, monday_start
 from .schedule import (anchor_training, week_for_date, pause_training, resume_training, get_schedule)
 from .shopping import shopping_list, as_csv, as_markdown
+from .reviews import load_reviews
+from .reviews import load_reviews
 from .nutrition import week_nutrition
 from pathlib import Path
 
@@ -222,7 +224,7 @@ def main(argv=None):
                 if changed:
                     raise ValueError(f'Source Markdown changed since approval: {changed}')
                 if args.action == 'shopping':
-                    result = shopping_list(menu,catalog)
+                    result = shopping_list(menu,catalog,resolutions=load_reviews(menu.week_start))
                     body = {'json': lambda:json.dumps(result,ensure_ascii=False,indent=2),
                             'md':lambda:as_markdown(result), 'csv':lambda:as_csv(result)}[args.format]()
                     if args.out:

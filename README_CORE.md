@@ -123,3 +123,9 @@ ingredient,measurement_state,basis_unit,kcal,protein_g,carbs_g,fat_g,source
 - The planner only reads the six explicitly configured Markdown files; it does not scan the corporate or personal vaults.
 - Some Markdown recipe images are remote, but this interface displays recipe text only. No agent or external API is invoked in the new modules.
 - Streamlit and its dependencies may need internet to install. The planner itself operates locally after installation.
+
+---
+
+## v0.3 nutrition feature branch
+
+See [`docs/NUTRITION_V03.md`](docs/NUTRITION_V03.md) for the **new USDA FoodData Central importer**, separate user-reviewed nutrition targets, manually selected activity for the second person, gated read-only portion recommendations and a shopping-list correction interface. This release **does not** ship verified nutrient records or personalized macro targets and does **not** make the existing `config/nutrition_reference_starter.csv` a verified source.
