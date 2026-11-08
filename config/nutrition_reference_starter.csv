@@ -1,0 +1,29 @@
+ingredient,measurement_state,basis_unit,kcal,protein_g,carbs_g,fat_g,source
+aveia,as_served,g,389,16.9,66.3,6.9,Generic approximate starter - verify before use
+skyr,as_served,g,63,11,4,0.2,Generic approximate starter - verify before use
+banana,as_served,g,89,1.1,22.8,0.3,Generic approximate starter - verify before use
+frutas vermelhas,as_served,g,50,1,12,0.4,Generic approximate starter - verify before use
+chia,as_served,g,486,16.5,42,30.7,Generic approximate starter - verify before use
+azeite,as_served,g,884,0,0,100,Generic approximate starter - verify before use
+azeite,raw,g,884,0,0,100,Generic approximate starter - verify before use
+mel,as_served,g,304,0.3,82.4,0,Generic approximate starter - verify before use
+leite,as_served,ml,61,3.2,4.8,3.3,Generic approximate starter - verify before use
+pao integral,as_served,g,247,13,41,4.2,Generic approximate starter - verify before use
+tomate,as_served,g,18,0.9,3.9,0.2,Generic approximate starter - verify before use
+tomate,raw,g,18,0.9,3.9,0.2,Generic approximate starter - verify before use
+espinafre,as_served,g,23,2.9,3.6,0.4,Generic approximate starter - verify before use
+brocolis,as_served,g,35,2.4,7.2,0.4,Generic approximate starter - verify before use
+maca,as_served,g,52,0.3,13.8,0.2,Generic approximate starter - verify before use
+frango,raw,g,120,22.5,0,2.6,Generic approximate starter - verify before use
+frango,cooked,g,165,31,0,3.6,Generic approximate starter - verify before use
+arroz,raw,g,365,7.1,80,0.7,Generic approximate starter - verify before use
+arroz,cooked,g,130,2.7,28.2,0.3,Generic approximate starter - verify before use
+batata,raw,g,77,2,17,0.1,Generic approximate starter - verify before use
+batata,cooked,g,87,1.9,20,0.1,Generic approximate starter - verify before use
+passata,raw,g,30,1.5,5.5,0.3,Generic approximate starter - verify before use
+whey,as_served,g,390,75,10,6,Generic approximate starter - verify before use
+nozes,as_served,g,654,15.2,13.7,65.2,Generic approximate starter - verify before use
+iogurte natural,as_served,g,63,3.5,4.7,3.5,Generic approximate starter - verify before use
+abacate,as_served,g,160,2,8.5,14.7,Generic approximate starter - verify before use
+cottage,as_served,g,98,11.1,3.4,4.3,Generic approximate starter - verify before use
+pasta de amendoim,as_served,g,588,25,20,50,Generic approximate starter - verify before use

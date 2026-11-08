@@ -1,0 +1,10 @@
+# Local-only planner; no outside network interfaces. Streamlit may still fetch UI
+# static assets through your browser according to its own implementation.
+[server]
+address = "127.0.0.1"
+headless = true
+enableCORS = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
