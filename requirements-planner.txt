@@ -1,0 +1,3 @@
+# In addition to the existing journal's pydantic and python-dotenv
+streamlit>=1.39,<2
+pandas>=2,<3
