@@ -1,0 +1,20 @@
+# Provisional dependencies inferred from journal_v3.py and tools.py.
+# These are NOT a tested compatibility lockfile. Freeze versions after Ubuntu installation.
+crewai
+python-dotenv
+pydantic
+markdown
+weasyprint
+requests
+py-sudoku
+pandas
+PyPDF2
+EbookLib
+beautifulsoup4
+google-auth
+google-auth-oauthlib
+google-api-python-client
+chess
+duckduckgo-search
+pytest
+ruff

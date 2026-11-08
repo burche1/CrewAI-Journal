@@ -13,9 +13,13 @@ from datetime import datetime
 import markdown
 from weasyprint import HTML, CSS
 from tools import read_local_file, fetch_chess_puzzle, generate_sudoku, fetch_weather, read_obsidian_7d, search_internet, read_recent_obsidian_notes, calculate_macros, read_local_ebook, read_recent_emails, read_todays_calendar, search_drive, read_internet_ebook, fetch_online_exercises, search_open_food_facts, fetch_obsidian_training_session
+from settings import (
+    PROJECT_ROOT, JOURNAL_CONFIG_FILE, JOURNAL_OUTPUT_DIR,
+    JOURNAL_STYLE_FILE, JOURNAL_NOTES_PATH, runtime_file,
+)
 
 # Load environment variables (.env)
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
 
 # Isso vai gerar algo como "2026-10-10" e "Saturday"
 data_atual = datetime.now().strftime("%Y-%m-%d")
@@ -182,7 +186,10 @@ journalist = Agent(
 personal_assistant = Agent(
     role="Executive Personal Assistant",
     goal="Summarize the previous day, outline today's schedule, and set the tone with a philosophical quote.",
-    backstory="You are an incredibly organized executive assistant. You have full access to the user's life (calendar, emails, drive). You are stoic, focused on extreme productivity, and provide clarity for the day ahead. The path to the Obsidian vault is '/home/alexandre.burche@canonical.com/Documents/Obsidian/MyVault', and inside 00_Journals is my diary.",
+    backstory=("You are a focused executive assistant. Only use explicitly authorized tools and "
+               "Obsidian notes. Configured journal-notes path: "
+               f"{JOURNAL_NOTES_PATH or 'NOT CONFIGURED'}. "
+               "If a source is unavailable, report it rather than assuming access."),
     verbose=True,
     llm=llm_mini,
     tools=tools_obsidian_all + tools_workspace
@@ -191,7 +198,10 @@ personal_assistant = Agent(
 deep_researcher = Agent(
     role="Chief of Staff & Deep Researcher",
     goal="Deep dive into notes, transcripts, and meetings to create a comprehensive, detailed summary and provide meeting prep.",
-    backstory="You act as the ultimate Chief of Staff. You loop through meeting notes and transcripts to connect the dots. You provide actionable advice on how the user should prepare for today's meetings based on historical context. The path to the Obsidian vault is '/home/alexandre.burche@canonical.com/Documents/Obsidian/MyVault', and inside 00_Journals is my diary.",
+    backstory=("You prepare meeting context from explicitly authorized notes and "
+               "workspace tools. Configured journal-notes path: "
+               f"{JOURNAL_NOTES_PATH or 'NOT CONFIGURED'}. "
+               "If a source is unavailable, report the gap rather than claiming access."),
     verbose=True, 
     llm=llm_mini,
     tools=tools_obsidian_all + tools_workspace
@@ -412,7 +422,7 @@ if __name__ == "__main__":
     print("Starting Burche Times newsroom operations...")
     
     # Lê o ficheiro de configuração
-    with open('config.json', 'r', encoding='utf-8') as f:
+    with JOURNAL_CONFIG_FILE.open('r', encoding='utf-8') as f:
         config = json.load(f)
     
     variaveis_dinamicas = {
@@ -436,17 +446,17 @@ if __name__ == "__main__":
     # ==========================================
     
     # 1. Weather
-    greeting_file = Path('/tmp/weather_greeting.txt')
-    tables_file = Path('/tmp/weather_tables.txt')
+    greeting_file = runtime_file('weather_greeting.txt')
+    tables_file = runtime_file('weather_tables.txt')
     frase_clima = greeting_file.read_text(encoding='utf-8').strip() if greeting_file.exists() else "here is your daily briefing."
     weather_tables = tables_file.read_text(encoding='utf-8').strip() if tables_file.exists() else ""
     weather_content_html = markdown.markdown(weather_tables, extensions=["tables"])
 
     # 2. Xadrez
-    chess_file = Path('/tmp/chess_puzzle.html')
+    chess_file = runtime_file('chess_puzzle.html')
     chess_content_html = chess_file.read_text(encoding='utf-8').strip() if chess_file.exists() else "Puzzle Temporariamente Indisponível."
     
-    sol_file = Path('/tmp/chess_solution.html')
+    sol_file = runtime_file('chess_solution.html')
     solution_content_html = sol_file.read_text(encoding='utf-8').strip() if sol_file.exists() else ""
 
     # 3. Sudoku
@@ -525,10 +535,16 @@ if __name__ == "__main__":
     </html>
     """
 
-    pasta_destino = "/home/alexandre.burche@canonical.com/Documents/Pessoal/CrewAI_Journal/Editions"
-    os.makedirs(pasta_destino, exist_ok=True)
-    nome_pdf = f"{pasta_destino}/Burche_Times_{data_atual}.pdf"
+    pasta_destino = JOURNAL_OUTPUT_DIR
+    pasta_destino.mkdir(parents=True, exist_ok=True)
+    nome_pdf = pasta_destino / f"Burche_Times_{data_atual}.pdf"
     
     print("\nGerando o PDF do jornal...")
-    HTML(string=html_completo).write_pdf(nome_pdf, stylesheets=[CSS('layout.css')])
+    # The old machine's CSS may not yet be available: render a plain PDF until recovered.
+    stylesheets = [CSS(filename=str(JOURNAL_STYLE_FILE))] if JOURNAL_STYLE_FILE.is_file() else []
+    if not stylesheets:
+        print(f"Warning: stylesheet not found at {JOURNAL_STYLE_FILE}; generating an unstyled PDF.")
+    HTML(string=html_completo, base_url=str(PROJECT_ROOT)).write_pdf(
+        str(nome_pdf), stylesheets=stylesheets
+    )
     print(f"✅ Concluído! Jornal salvo em: {nome_pdf}")

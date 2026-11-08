@@ -20,6 +20,10 @@ import hashlib
 import chess
 import random
 from duckduckgo_search import DDGS
+from settings import (
+    TRAINING_PLAN_FILE, JOURNAL_STATE_DIR, BOOKS_DIR,
+    GOOGLE_TOKEN_FILE, GOOGLE_CREDENTIALS_FILE, runtime_file,
+)
 
 # ==========================================
 # 1. ACESSO A ARQUIVOS LOCAIS (O mais básico)
@@ -96,7 +100,7 @@ def fetch_chess_puzzle() -> str:
         
         # Salva o bloco visual completo (texto + imagem) para injeção direta no WeasyPrint
         puzzle_html = f'{chess_header}\n<img src="{img_url}" alt="Chess Board" />'
-        Path('/tmp/chess_puzzle.html').write_text(puzzle_html, encoding='utf-8')
+        runtime_file('chess_puzzle.html').write_text(puzzle_html, encoding='utf-8')
         
         # 4. Solução em Notação Algébrica (SAN)
         board = chess.Board(fen)
@@ -133,7 +137,7 @@ def fetch_chess_puzzle() -> str:
         table_lines.append('</table>')
         solution_html_table = "\n".join(table_lines)
         
-        Path('/tmp/chess_solution.html').write_text(solution_html_table, encoding='utf-8')
+        runtime_file('chess_solution.html').write_text(solution_html_table, encoding='utf-8')
         
         return (
             f"{chess_header}\n\n"
@@ -453,8 +457,8 @@ def fetch_weather(location: str) -> str:
         combined_tables = summary_table + hourly_table
         
         # Salva diretamente em arquivos temporários
-        Path('/tmp/weather_greeting.txt').write_text(summary_sentence, encoding='utf-8')
-        Path('/tmp/weather_tables.txt').write_text(combined_tables, encoding='utf-8')
+        runtime_file('weather_greeting.txt').write_text(summary_sentence, encoding='utf-8')
+        runtime_file('weather_tables.txt').write_text(combined_tables, encoding='utf-8')
         
         return combined_tables
     except Exception as e:
@@ -586,10 +590,8 @@ def read_obsidian_7d(pasta_obsidian: str) -> str:
 # 8. LEITOR E TRACKER DO PLANO DE TREINO (52 SEMANAS)
 # ==========================================
 
-# Caminho exato para o seu arquivo de treino:
-TRAINING_PLAN_FILE = Path(
-    "/home/alexandre.burche@canonical.com/Documents/Obsidian/MyVault/Personal/Triathlon training/Training Summary.md"
-)
+# Training source is configured via TRAINING_PLAN_FILE in .env.
+# No old-machine paths are embedded in the application.
 
 @tool("Obsidian_Training_Plan_Tracker")
 def fetch_obsidian_training_session(day_of_week: str = "") -> str:
@@ -598,9 +600,11 @@ def fetch_obsidian_training_session(day_of_week: str = "") -> str:
     training markdown file in the Obsidian vault. Automatically manages and
     advances weekly progress stored in training_tracker.json.
     """
-    tracker_file = Path(
-        "/home/alexandre.burche@canonical.com/Documents/Pessoal/CrewAI_Journal/Training_db/training_tracker.json"
-    )
+    if TRAINING_PLAN_FILE is None:
+        return "Erro: Configure TRAINING_PLAN_FILE no arquivo .env antes de usar o treino."
+    if not TRAINING_PLAN_FILE.is_file():
+        return f"Erro: Arquivo de treino não encontrado: {TRAINING_PLAN_FILE}"
+    tracker_file = JOURNAL_STATE_DIR / "training_tracker.json"
     tracker_file.parent.mkdir(parents=True, exist_ok=True)
 
     today = datetime.now()
@@ -702,7 +706,7 @@ def fetch_obsidian_training_session(day_of_week: str = "") -> str:
         )
 
     # Salva no arquivo temporário para injeção direta no layout WeasyPrint
-    Path("/tmp/todays_workout.txt").write_text(formatted_output, encoding="utf-8")
+    runtime_file("todays_workout.txt").write_text(formatted_output, encoding="utf-8")
 
     return formatted_output
 
@@ -769,9 +773,10 @@ def read_local_ebook(nome_ficheiro: str) -> str:
     Lê o próximo trecho de 15 minutos (aprox. 4000 caracteres) de um livro local.
     O sistema lembra-se automaticamente de onde parou no dia anterior.
     """
-    pasta_livros = Path('/home/alexandre.burche@canonical.com/Documents/Pessoal/CrewAI_Journal/Books/')
+    pasta_livros = BOOKS_DIR
     caminho_ficheiro = pasta_livros / nome_ficheiro
-    tracker_file = pasta_livros / 'reading_tracker.json'
+    tracker_file = JOURNAL_STATE_DIR / 'reading_tracker.json'
+    tracker_file.parent.mkdir(parents=True, exist_ok=True)
     
     if not caminho_ficheiro.exists():
         return f"Erro: O ficheiro {nome_ficheiro} não existe na pasta {pasta_livros}."
@@ -850,15 +855,18 @@ SCOPES = [
 def get_google_credentials():
     """Lida com a autenticação. Na primeira vez, abre o navegador para login."""
     creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if GOOGLE_TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(GOOGLE_TOKEN_FILE), SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(str(GOOGLE_CREDENTIALS_FILE), SCOPES)
             creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
+        GOOGLE_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Create OAuth token with private permissions.
+        fd = os.open(str(GOOGLE_TOKEN_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as token:
             token.write(creds.to_json())
     return creds
 
@@ -949,9 +957,10 @@ def read_internet_ebook(url: str) -> str:
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
         
         # Usa a mesma pasta de livros para guardar o tracker online
-        pasta_livros = Path('/home/alexandre.burche@canonical.com/Documents/Pessoal/CrewAI_Journal/Books')
+        pasta_livros = BOOKS_DIR
         pasta_livros.mkdir(parents=True, exist_ok=True)
-        tracker_file = pasta_livros / 'online_reading_tracker.json'
+        tracker_file = JOURNAL_STATE_DIR / 'online_reading_tracker.json'
+        tracker_file.parent.mkdir(parents=True, exist_ok=True)
         
         tracker = {}
         if tracker_file.exists():

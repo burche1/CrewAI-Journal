@@ -1,0 +1,7 @@
+{
+  "leitura": {
+    "fonte": "local",
+    "livro_local_nome": "example.txt",
+    "livro_internet_url": "https://www.gutenberg.org/"
+  }
+}
