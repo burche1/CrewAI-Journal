@@ -1,0 +1,132 @@
+@page {
+    size: A4;
+    margin: 2cm;
+}
+
+body {
+    font-family: "Georgia", "Times New Roman", serif;
+    color: #333;
+    line-height: 1.5;
+}
+
+/* =========================================
+   TÍTULOS E TEXTO GERAL
+   ========================================= */
+h1 {
+    text-align: center;
+    font-size: 36pt;
+    text-transform: uppercase;
+    border-bottom: 2px solid #333;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+h2 {
+    font-size: 18pt;
+    border-bottom: 1px solid #ccc;
+    margin-top: 30px;
+}
+
+h3, h4, h5, h6 {
+    font-size: 14pt;
+    font-weight: bold;
+    margin-top: 15px;
+    margin-bottom: 5px;
+    border: none;
+}
+
+p, li, ul, ol, div, span {
+    font-size: 12pt;
+    line-height: 1.5;
+}
+
+strong, b {
+    font-size: inherit;
+}
+
+.content {
+    column-count: 1;
+    text-align: justify;
+}
+
+.hero-greeting {
+    text-align: center;
+    font-size: 14pt;
+    font-style: italic;
+    color: #555;
+    margin-top: -10px;
+    margin-bottom: 25px;
+    border-bottom: 1px dashed #ccc;
+    padding-bottom: 12px;
+}
+
+/* =========================================
+   IMAGENS (Inclui o Xadrez)
+   ========================================= */
+img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    
+    /* Evita que as imagens sejam cortadas pela quebra de página */
+    page-break-inside: avoid;
+    break-inside: avoid;
+    display: block;
+}
+
+/* =========================================
+   ESTILOS DO TABULEIRO DE SUDOKU (Maior e Centrado)
+   ========================================= */
+table.sudoku-board {
+    border-collapse: collapse;
+    margin: 35px auto;        /* O 'auto' centraliza a tabela na página */
+    width: auto;
+    font-family: "Georgia", serif;
+    background-color: #ffffff;
+    border: 2px solid #000000; /* Garante a borda preta em volta de TODO o quadrado */
+    
+    /* Evita que o Sudoku seja cortado entre páginas */
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+table.sudoku-board td {
+    width: 45px;               /* Aumentado de 40px para 45px */
+    height: 45px;              /* Aumentado de 40px para 45px */
+    font-size: 20pt;           /* Números maiores e mais visíveis */
+    text-align: center;
+    vertical-align: middle;
+    border: 1px solid #888888; /* Linhas internas finas */
+    color: #000000;
+}
+
+/* Divisórias mais grossas dos blocos 3x3 internos */
+table.sudoku-board tr:nth-child(3n) td {
+    border-bottom: 2px solid #000000;
+}
+table.sudoku-board td:nth-child(3n) {
+    border-right: 2px solid #000000;
+}
+
+/* =========================================
+   TABELAS GERAIS (Ex: Clima e Resumos)
+   ========================================= */
+.content table:not(.sudoku-board) {
+    width: 85%;
+    margin: 20px auto;
+    border-collapse: collapse;
+}
+
+.content table:not(.sudoku-board) th,
+.content table:not(.sudoku-board) td {
+    text-align: center !important;
+    padding: 10px 15px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.content table:not(.sudoku-board) th {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #444;
+    font-weight: bold;
+}
