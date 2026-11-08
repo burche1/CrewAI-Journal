@@ -1,0 +1,7 @@
+{
+    "leitura": {
+        "fonte": "local", 
+        "livro_local_nome": "Phil_Knight_Shoe_Dog.pdf",
+        "livro_internet_url": "https://www.gutenberg.org/cache/epub/1342/pg1342.txt"
+    }
+}
