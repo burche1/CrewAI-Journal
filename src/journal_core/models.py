@@ -18,7 +18,7 @@ class Ingredient(BaseModel):
 class Recipe(BaseModel):
     id: str
     category: Literal["breakfast", "lunch", "dinner", "snacks"]
-    number: int = Field(ge=1, le=99)
+    number: int = Field(ge=1)
     title: str
     source_file: str
     source_sha256: str
@@ -30,6 +30,7 @@ class Recipe(BaseModel):
     organization: str | None = None
     details: dict[str, str] = Field(default_factory=dict)
     markdown: str
+    image_url: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 

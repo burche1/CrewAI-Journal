@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 from .models import WeeklyMenu
@@ -59,6 +60,9 @@ def connect(*, create: bool = True):
     if create:
         db.parent.mkdir(parents=True, exist_ok=True)
     cx = sqlite3.connect(db)
+    if create:
+        # Recipe plans and individual nutrition-related notes are private local state.
+        os.chmod(db, 0o600)
     try:
         cx.execute("PRAGMA foreign_keys = ON")
         if create:
@@ -133,3 +137,90 @@ def approve_menu(week_start: str) -> None:
             return
         cx.execute("UPDATE weekly_menus SET status='approved', updated_at=? WHERE week_start=?",
                    (utc_now(), week_start))
+
+# v0.5: audited, reversible weekly-plan management.
+HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS weekly_menu_history (
+  version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  week_start TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('revise','reset','restore')),
+  prior_status TEXT NOT NULL,
+  selections_json TEXT NOT NULL,
+  source_hashes_json TEXT NOT NULL,
+  portion_factors_json TEXT NOT NULL,
+  shopping_reviews_json TEXT NOT NULL,
+  archived_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_weekly_menu_history_week ON weekly_menu_history(week_start,version_id);
+"""
+
+
+def _archive_current(cx: sqlite3.Connection, week_start: str, action: str, reviews: dict) -> bool:
+    row = cx.execute('''SELECT status,selections_json,source_hashes_json,portion_factors_json
+                        FROM weekly_menus WHERE week_start=?''',(week_start,)).fetchone()
+    if not row: return False
+    cx.execute('''INSERT INTO weekly_menu_history
+                  (week_start,action,prior_status,selections_json,source_hashes_json,
+                   portion_factors_json,shopping_reviews_json,archived_at)
+                  VALUES (?,?,?,?,?,?,?,?)''',
+               (week_start,action,row[0],row[1],row[2],row[3],
+                json.dumps(reviews,ensure_ascii=False),utc_now()))
+    return True
+
+
+def manage_menu(week_start: str, action: str) -> None:
+    """Archive original menu plus reviews, then unlock or clear the week.
+
+    Does not touch any training, nutrition, or other-week data.
+    Existing menu content remains recoverable using restore_menu_version.
+    """
+    from .reviews import load_reviews, save_reviews
+    from datetime import date
+    if date.fromisoformat(week_start).weekday()!=0:
+        raise ValueError('Week must begin on Monday')
+    if action not in {'revise','reset'}:
+        raise ValueError('Action must be revise or reset')
+    reviews = load_reviews(week_start)
+    with connect() as cx:
+        cx.executescript(HISTORY_SCHEMA)
+        if not _archive_current(cx,week_start,action,reviews):
+            raise ValueError('No weekly menu for this date')
+        if action == 'revise':
+            cx.execute("UPDATE weekly_menus SET status='draft',updated_at=? WHERE week_start=?",
+                       (utc_now(),week_start))
+        else:
+            cx.execute('DELETE FROM weekly_menus WHERE week_start=?',(week_start,))
+    # Only current reviews are cleared; their previous values survive in history.
+    save_reviews(week_start,{})
+
+
+def list_menu_history(week_start: str) -> list[dict]:
+    with connect() as cx:
+        cx.executescript(HISTORY_SCHEMA)
+        rows=cx.execute('''SELECT version_id,action,prior_status,archived_at
+                           FROM weekly_menu_history WHERE week_start=? ORDER BY version_id DESC''',
+                        (week_start,)).fetchall()
+    return [{'version_id':r[0],'action':r[1], 'prior_status':r[2],'archived_at':r[3]} for r in rows]
+
+
+def restore_menu_version(week_start: str, version_id: int) -> None:
+    """Restore archived selections as a DRAFT; re-approval is required."""
+    from .reviews import load_reviews, save_reviews
+    reviews=load_reviews(week_start)
+    with connect() as cx:
+        cx.executescript(HISTORY_SCHEMA)
+        row=cx.execute('''SELECT selections_json,source_hashes_json,portion_factors_json
+                          FROM weekly_menu_history WHERE week_start=? AND version_id=?''',
+                       (week_start,int(version_id))).fetchone()
+        if not row: raise ValueError('Archived version not found for this week')
+        _archive_current(cx,week_start,'restore',reviews)
+        cx.execute('''INSERT INTO weekly_menus
+                      (week_start,status,selections_json,source_hashes_json,updated_at,portion_factors_json)
+                      VALUES (?,'draft',?,?,?,?)
+                      ON CONFLICT(week_start) DO UPDATE SET status='draft',
+                      selections_json=excluded.selections_json,
+                      source_hashes_json=excluded.source_hashes_json,
+                      updated_at=excluded.updated_at,
+                      portion_factors_json=excluded.portion_factors_json''',
+                   (week_start,row[0],row[1],utc_now(),row[2]))
+    save_reviews(week_start,{})

@@ -1,14 +1,17 @@
 """Local Streamlit week planner. Run: streamlit run planner_app.py --server.address 127.0.0.1"""
 from __future__ import annotations
 from datetime import date, timedelta
+import hashlib
 import json
+import math
 
 import pandas as pd
 import streamlit as st
 from src.journal_core.recipe_parser import load_catalog, get_recipe
 from src.journal_core.training_parser import load_training
 from src.journal_core.weekly import create_menu, monday_start
-from src.journal_core.state import save_menu, approve_menu, load_menu
+from src.journal_core.state import (save_menu, approve_menu, load_menu, manage_menu,
+                                    list_menu_history, restore_menu_version)
 from src.journal_core.schedule import anchor_training, week_for_date, pause_training, resume_training
 from src.journal_core.shopping import shopping_list, as_csv, as_markdown
 from src.journal_core.nutrition import week_nutrition, reference_file
@@ -18,10 +21,12 @@ from src.journal_core.profiles import (MacroTarget, PersonProfile, NutritionProf
                                       target_for_person, save_manual_load, load_manual_load)
 from src.journal_core.fooddata import search as fdc_search, fetch as fdc_fetch, food_to_row, write_reference, label_to_row
 from src.journal_core.optimizer import propose_day
+from src.journal_core.targets import estimate_person, load_inputs, save_inputs
+from src.journal_core.yields import save_yield, load_yields
 
 st.set_page_config(page_title='CrewAI Journal · Weekly Planner', page_icon='🥗', layout='wide')
 st.title('🥗 CrewAI Journal · Weekly Planner')
-st.caption('Local, offline, read-only recipe sources. No CrewAI or Google access.')
+st.caption('Local planner · original Markdown recipe files stay read-only. Recipe photos load from external websites when enabled; no CrewAI or Google access.')
 
 def catalog_cached():
     return load_catalog()
@@ -36,7 +41,7 @@ except (ValueError,OSError) as exc:
     st.error(f'Could not load source files: {exc}')
     st.stop()
 
-first, second, third = st.tabs(['🍽️ Weekly meals', '🚴 Training timeline', '🥗 Nutrition setup'])
+first, second, third, fourth = st.tabs(['🍽️ Weekly meals', '🚴 Training timeline', '🎯 Nutrition goals', '🔎 Food reference'])
 
 with second:
     st.subheader('Automatic week progression')
@@ -83,11 +88,13 @@ with second:
                 except ValueError as exc:
                     st.error(str(exc))
 
-with third:
-    st.subheader('Verified food data')
+with fourth:
+    st.subheader('Food reference · verified ingredients')
+    st.info('This optional database stores calories, protein, carbohydrates and fat per 100 g or ml. '
+                   'It is needed for complete nutrition calculations, not for the grocery checklist.')
     st.caption('The old generic demo nutrition CSV is NOT used by default. Add explicitly reviewed USDA foods or verified package labels. No automatic fuzzy matching.')
     ref_path=reference_file()
-    st.info(f'Local private reference: {ref_path} · {"exists" if ref_path.exists() else "not created yet"}')
+    st.caption('Local private file: verified_nutrition.csv · '+('available' if ref_path.exists() else 'empty'))
     with st.expander('USDA FoodData Central — search and import',expanded=False):
         st.markdown('An `FDC_API_KEY` in your private `.env` is required. The API is called only when you click Search or Import.')
         query=st.text_input('Search English food name',value='banana raw',key='fdc_query')
@@ -143,56 +150,104 @@ with third:
                 write_reference(ref_path,row)
                 st.success('Local label mapping saved. Reference records keep their source.')
             except (ValueError,OSError) as exc: st.error(str(exc))
+
+with third:
+    st.subheader('Your nutrition goals · guided starting estimates')
+    st.markdown('**What is this?** Training plans indicate which days may need more fuel; '
+                'this screen estimates initial energy and protein/carbohydrate/fat targets for each person. '
+                '**It does not claim measured energy expenditure or prescribe a medical diet.**')
+    st.caption('The starting height/weight/age shown here come from your recipe Markdown notes. '
+               'Check current measurements, adjust the activity assumptions, and confirm before saving.')
+    existing_profiles=load_profiles()
+    remembered=load_inputs()
+    values={}
+    for person,label,defaults in [
+            ('person_a','You',{'weight_kg':80.0,'height_cm':191.0,'age':33,'sex':'male',
+                               'background_multiplier':1.35,'objective_delta_kcal':0.0,
+                               'protein_g_per_kg':1.6,'fat_g_per_kg':0.8,'use_journal_training':True}),
+            ('person_b','Your wife',{'weight_kg':75.0,'height_cm':176.0,'age':33,'sex':'female',
+                                    'background_multiplier':1.35,'objective_delta_kcal':0.0,
+                                    'protein_g_per_kg':1.6,'fat_g_per_kg':0.8,'use_journal_training':False})]:
+        init={**defaults,**remembered.get(person,{})}
+        with st.expander(f'👤 {label}: measurements and goals',expanded=True):
+            m1,m2,m3,m4=st.columns(4)
+            with m1: wt=st.number_input('Weight (kg)',min_value=25.0,max_value=300.0,value=float(init['weight_kg']),step=0.5,key=f'v05_{person}_weight')
+            with m2: ht=st.number_input('Height (cm)',min_value=120.0,max_value=230.0,value=float(init['height_cm']),step=1.0,key=f'v05_{person}_height')
+            with m3: age=st.number_input('Age',min_value=18,max_value=100,value=int(init['age']),step=1,key=f'v05_{person}_age')
+            with m4: sex=st.selectbox('Sex (for resting-energy formula)',['male','female'],index=['male','female'].index(init['sex']),key=f'v05_{person}_sex')
+            b1,b2,b3=st.columns(3)
+            with b1: mult=st.selectbox('Activity outside scheduled workouts',[1.2,1.3,1.35,1.4,1.5,1.6],index=([1.2,1.3,1.35,1.4,1.5,1.6].index(float(init['background_multiplier'])) if float(init['background_multiplier']) in [1.2,1.3,1.35,1.4,1.5,1.6] else 2),key=f'v05_{person}_background',help='Multiplier for everyday non-training activity; training-day additions below are kept separate.')
+            with b2: delta=st.selectbox('Body-weight objective',['maintain','gentle gain','gentle loss'],index={'maintain':0,'gentle gain':1,'gentle loss':2}.get(init.get('objective','maintain'),0),key=f'v05_{person}_objective')
+            with b3: use_train=st.checkbox('Use journal training calendar',value=bool(init['use_journal_training']),key=f'v05_{person}_triathlon',help='Turn on only if this person follows the actual CrewAI triathlon training schedule.')
+            a,b=st.columns(2)
+            with a: ppk=st.slider('Protein (g per kg)',1.0,2.5,float(init['protein_g_per_kg']),step=0.1,key=f'v05_{person}_protein')
+            with b: fpk=st.slider('Fat (g per kg)',0.4,1.4,float(init['fat_g_per_kg']),step=0.05,key=f'v05_{person}_fat')
+            with st.expander('Advanced: extra energy for training days (editable assumptions)'):
+                st.caption('These are editable planning increments, NOT measured calorie burn. Training intensity and duration may differ.')
+                adcols=st.columns(3)
+                default_add=init.get('training_additions',{'rest':0,'easy':150,'moderate':350,'long':600})
+                adds={'rest':0}
+                for col,load in zip(adcols,('easy','moderate','long')):
+                    with col:
+                        adds[load]=st.number_input(f'{load.title()} +kcal',0,2000,int(default_add.get(load,0)),step=50,key=f'v05_{person}_{load}_add')
+            objective_adj={'maintain':0.0,'gentle gain':200.0,'gentle loss':-200.0}[delta]
+            inputs={'weight_kg':wt,'height_cm':ht,'age':age,'sex':sex,'background_multiplier':mult,
+                    'objective_delta_kcal':objective_adj,'objective':delta,
+                    'training_additions':adds,'protein_g_per_kg':ppk,'fat_g_per_kg':fpk,
+                    'use_journal_training':use_train}
+            try:
+                calc=estimate_person(**{k:v for k,v in inputs.items() if k not in ('objective','use_journal_training')})
+                display=pd.DataFrame([{'Day type':level.title(),'kcal/day':int(t['kcal']),
+                                        'Protein g':t['protein_g'],'Carbs g':t['carbs_g'],'Fat g':t['fat_g']}
+                                       for level,t in calc['targets'].items()])
+                st.dataframe(display,hide_index=True,use_container_width=True)
+                st.caption(f"Resting-energy estimate: {calc['resting_estimate_kcal']} kcal; "
+                           f"non-training background estimate: {calc['background_estimate_kcal']} kcal. "
+                           'Not an exercise calorie tracker.')
+                values[person]={'input':inputs,'calc':calc}
+            except ValueError as exc:
+                st.error(str(exc))
+    confirmed=st.checkbox('I have reviewed both estimates and want to use these as provisional meal-planning targets',key='v05_confirm_targets')
+    if st.button('💾 Save targets for both people',disabled=not confirmed or len(values)!=2,type='primary'):
+        try:
+            payload={'people':{},'verified_by_user':True,'notes':'User-reviewed estimates (v0.5), not clinical prescriptions'}
+            for person,label in [('person_a','Me'),('person_b','Wife')]:
+                payload['people'][person]={'label':label,
+                    'use_journal_training':values[person]['input']['use_journal_training'],
+                    'targets_by_load':values[person]['calc']['targets']}
+            validated=NutritionProfiles.model_validate(payload)
+            save_profiles(validated)
+            save_inputs({person:values[person]['input'] for person in PERSONS})
+            st.success('Reviewed starting targets saved locally. No original recipes have been changed.')
+        except (ValueError,OSError) as exc:st.error(str(exc))
     st.divider()
-    st.subheader('Individual nutrition targets — manually confirmed')
-    st.caption('You and your wife have separate targets. This interface does not calculate medical calorie requirements. Enter reviewed values for rest/easy/moderate/long days.')
-    current=load_profiles()
-    with st.form('profile_form'):
-        profiles_data={}
-        for person,default_label in [('person_a','Me'),('person_b','Wife')]:
-            st.markdown(f'**{default_label}**')
-            existing=current.people[person] if current else None
-            label=st.text_input('Label',value=existing.label if existing else default_label,key=f'{person}_label')
-            use_training=st.checkbox('Use my CrewAI triathlon calendar for activity classification',
-                value=existing.use_journal_training if existing else person=='person_a',
-                key=f'{person}_use_journal')
-            targets={}
-            for load in LOADS:
-                st.caption(f'{load.title()} training load')
-                values=existing.targets_by_load[load] if existing else None
-                cols=st.columns(4)
-                for idx,(field,caption) in enumerate([('kcal','kcal/day'),('protein_g','Protein g/day'),
-                                                      ('carbs_g','Carbs g/day'),('fat_g','Fat g/day')]):
-                    with cols[idx]:
-                        targets.setdefault(load,{})[field]=st.number_input(
-                            f'{load} {caption}',min_value=0.0,max_value=10000.0,step=5.0,
-                            value=float(getattr(values,field)) if values else 0.0,key=f'{person}_{load}_{field}')
-            profiles_data[person]={'label':label,'use_journal_training':use_training,'targets_by_load':targets}
-        agree=st.checkbox('I reviewed both people’s numbers and agree to use these as planning targets',
-                          value=current.verified_by_user if current else False)
-        save_target=st.form_submit_button('Save nutrition targets')
-    if save_target:
-        try:
-            if not agree:raise ValueError('You must confirm the individual targets before saving.')
-            profile=NutritionProfiles(people=profiles_data,verified_by_user=True)
-            save_profiles(profile)
-            st.success('Private nutrition profiles saved locally (excluded from Git).')
-        except ValueError as exc:st.error(str(exc))
-    st.caption('For training load, P1–P4 stays easy even on weekends. The main cycle treats long weekend sessions as long days. Actual session changes require review.')
-    if current and current.verified_by_user:
-        inspect=st.date_input('Preview training-derived target date',value=date.today(),key='nutrition_target_date')
-        try:
-            statuses={x:target_for_person(current,x,inspect) for x in PERSONS}
-            for person in PERSONS:
-                if statuses[person]['status']=='needs_activity':
-                    st.warning(f'{current.people[person].label}: no activity selection for this day')
-                    activity=st.selectbox(f'Activity for {current.people[person].label}',LOADS,
-                                          key=f'manual_load_{person}_{inspect.isoformat()}')
-                    if st.button(f'Save activity for {current.people[person].label}',key=f'save_activity_{person}_{inspect}'):
-                        save_manual_load(person,inspect,activity)
-                        st.success('Activity saved locally; reload to update targets')
-            st.json(statuses)
-        except (OSError,ValueError) as exc:st.warning(str(exc))
+    st.subheader('Individual activity, without copying your triathlon plan')
+    st.caption('If someone does not follow the journal training schedule, choose their planned activity for each day. '
+               'No exercise completion is inferred.')
+    manual_date=st.date_input('Week to classify',value=monday_start(date.today()),key='v05_activity_week')
+    manual_week=monday_start(manual_date)
+    curr=load_profiles()
+    if curr:
+        for person in PERSONS:
+            if curr.people[person].use_journal_training:
+                st.caption(f'{curr.people[person].label}: uses the triathlon calendar; no manual selection needed.')
+                continue
+            st.markdown(f"**{curr.people[person].label}**")
+            columns=st.columns(7)
+            for i,col in enumerate(columns):
+                d=manual_week+timedelta(days=i)
+                old=load_manual_load(person,d)
+                with col:
+                    load=st.selectbox(d.strftime('%a %d'),['Not set']+list(LOADS),
+                                      index=(['Not set']+list(LOADS)).index(old) if old else 0,
+                                      key=f'v05_load_{person}_{d.isoformat()}')
+                    if load!='Not set' and load!=old:
+                        if st.button('Save',key=f'v05_load_save_{person}_{d}'):
+                            save_manual_load(person,d,load)
+                            st.rerun()
+    else:
+        st.caption('Save your initial targets first, then classify training for the non-triathlon person.')
+
 
 with first:
     start=st.date_input('Week starting Monday',value=monday_start(date.today())+timedelta(days=7), key='menu_start')
@@ -202,28 +257,111 @@ with first:
     saved=load_menu(start.isoformat())
     if saved:
         st.info(f"Existing plan: **{saved.status}**. Approved menus are locked against accidental changes.")
+    def clear_week_widgets(week):
+        prefix=f'v04_{week}_'
+        for key in list(st.session_state.keys()):
+            if (str(key).startswith(prefix) or str(key).startswith(f'editor_{week}_')
+                    or str(key).startswith(f'factor_a_{week}') or str(key).startswith(f'factor_b_{week}')):
+                del st.session_state[key]
+    versions=list_menu_history(start.isoformat())
+    with st.expander(f'🗂️ Manage this week · {len(versions)} archived versions',expanded=False):
+        st.caption('Every revision or reset archives the previous menu and shopping decisions. '
+                   'Training history, nutritional targets and other weeks are never altered.')
+        if saved:
+            x1,x2=st.columns(2)
+            with x1:
+                revise_ok=st.checkbox('Unlock this week as a draft',key=f'v05_revise_confirm_{start}')
+                if st.button('✏️ Revise the selected week',disabled=not revise_ok,key=f'v05_revise_{start}'):
+                    try:
+                        manage_menu(start.isoformat(),'revise')
+                        clear_week_widgets(start)
+                        st.rerun()
+                    except (ValueError,OSError) as exc:st.error(str(exc))
+            with x2:
+                reset_ok=st.checkbox('Archive and clear all meal selections for this week',key=f'v05_reset_confirm_{start}')
+                if st.button('↩️ Restart this week from scratch',disabled=not reset_ok,key=f'v05_reset_{start}'):
+                    try:
+                        manage_menu(start.isoformat(),'reset')
+                        clear_week_widgets(start)
+                        st.rerun()
+                    except (ValueError,OSError) as exc:st.error(str(exc))
+        if versions:
+            previous=st.selectbox('Archived version',versions,format_func=lambda row:
+                f"Version {row['version_id']} · {row['prior_status']} · {row['action']} · {row['archived_at'][:19]}",
+                key=f'v05_archive_{start}')
+            restore_ok=st.checkbox('Restore as a NEW DRAFT (requires re-approval)',key=f'v05_restore_confirm_{start}')
+            if st.button('♻️ Restore archived selections',disabled=not restore_ok,key=f'v05_restore_{start}'):
+                try:
+                    restore_menu_version(start.isoformat(),previous['version_id'])
+                    clear_week_widgets(start)
+                    st.rerun()
+                except (ValueError,OSError) as exc:st.error(str(exc))
     cats=['breakfast','lunch','dinner','snacks']
     names={'breakfast':'Breakfast','lunch':'Lunch','dinner':'Dinner','snacks':'Snacks'}
+    show_photos=st.checkbox('Show recipe photos from Markdown (uses external image hosts)',value=True,
+                            key='v04_external_recipe_images')
+    st.caption('Search by name, browse picture cards and choose exactly seven recipes per category. '
+               'The catalog automatically includes recipes you append to the Markdown files.')
     tabs=st.tabs(['🌅 Breakfast','🥙 Lunch','🍲 Dinner','🍌 Snacks'])
     selected={}
+    locked=saved is not None and saved.status=='approved'
     for category, tab in zip(cats,tabs):
         with tab:
-            options=[r.id for r in catalog[category]]
-            id_to_title={r.id:f'{r.number:02d} — {r.title}' for r in catalog[category]}
-            defaults=saved.selections[category] if saved else []
-            selected[category]=st.multiselect(
-                f'Select exactly seven {names[category].lower()} recipes',
-                options, default=defaults, format_func=lambda rid,m=id_to_title:m[rid],
-                max_selections=7, key=f'{start}_{category}_recipes', disabled=saved is not None and saved.status=='approved')
-            st.caption(f'{len(selected[category])}/7 chosen · click items to choose, search by recipe title')
-            with st.expander('See details of selected recipes'):
-                for rid in selected[category]:
-                    r=get_recipe(catalog,rid)
-                    st.markdown(f'**{r.title}** · {rid}')
-                    st.markdown(f'**You:** {r.portions["person_a"]}')
-                    st.markdown(f'**Wife:** {r.portions["person_b"]}')
-                    if r.preparation:
-                        st.caption(r.preparation)
+            state_key=f'v04_{start.isoformat()}_{category}_selected'
+            valid_ids={r.id for r in catalog[category]}
+            if state_key not in st.session_state:
+                st.session_state[state_key]=list(saved.selections.get(category,[])) if saved else []
+            # Existing approved selections always remain authoritative.
+            if locked:
+                st.session_state[state_key]=list(saved.selections[category])
+            current_ids=[rid for rid in st.session_state[state_key] if rid in valid_ids]
+            st.session_state[state_key]=current_ids
+            st.progress(len(current_ids)/7,text=f'{names[category]}: {len(current_ids)} of 7 selected')
+            search=st.text_input(f'Search {names[category].lower()} recipes',
+                                key=f'v04_search_{category}',placeholder='Name or recipe number')
+            recipes=[r for r in catalog[category] if search.casefold().strip() in
+                     f'{r.number} {r.title} {r.id}'.casefold()]
+            page_count=max(1,math.ceil(len(recipes)/9))
+            page=st.selectbox(f'Page ({len(recipes)} matching recipes)',list(range(page_count)),
+                              format_func=lambda n:f'{n+1} / {page_count}',
+                              key=f'v04_page_{category}')
+            page_recipes=recipes[page*9:(page+1)*9]
+            if not page_recipes:
+                st.info('No matching recipes. Try a different search.')
+            columns=st.columns(3)
+            for i,r in enumerate(page_recipes):
+                with columns[i%3]:
+                    with st.container(border=True):
+                        if show_photos and r.image_url:
+                            try:
+                                st.image(r.image_url,use_container_width=True)
+                            except (ValueError,OSError):
+                                st.caption('Image unavailable; recipe text remains accessible.')
+                        st.markdown(f'**{r.number:02d} · {r.title}**')
+                        st.caption(f'{r.portions["person_a"][:100]}')
+                        is_selected=r.id in current_ids
+                        if st.button('✓ Remove' if is_selected else '+ Add recipe',
+                                     key=f'v04_card_{start}_{category}_{r.id}',
+                                     disabled=locked or (not is_selected and len(current_ids)>=7),
+                                     use_container_width=True):
+                            if is_selected:
+                                st.session_state[state_key]=[x for x in current_ids if x!=r.id]
+                            else:
+                                st.session_state[state_key]=current_ids+[r.id]
+                            st.rerun()
+                        with st.expander('Ingredients & preparation'):
+                            st.markdown(f'**You:** {r.portions["person_a"]}')
+                            st.markdown(f'**Wife:** {r.portions["person_b"]}')
+                            if r.preparation: st.caption(r.preparation)
+            selected[category]=list(st.session_state[state_key])
+            with st.expander(f'Selected for the week ({len(selected[category])}/7)',expanded=False):
+                if not selected[category]:
+                    st.caption('No recipes selected yet.')
+                else:
+                    for rid in selected[category]:
+                        r=get_recipe(catalog,rid)
+                        st.markdown(f'**{r.number:02d} — {r.title}**')
+                        st.caption(f'You: {r.portions["person_a"]} | Wife: {r.portions["person_b"]}')
     if not all(len(selected[x])==7 for x in cats):
         st.warning('Choose seven recipes in each of the four tabs to unlock the weekly schedule.')
         st.stop()
@@ -242,7 +380,8 @@ with first:
             row[names[category]]=labels[category][selected[category][index]]
         rows.append(row)
     edited=st.data_editor(pd.DataFrame(rows),hide_index=True, num_rows='fixed',
-        disabled=True if saved is not None and saved.status=='approved' else ['Day'],key=f'editor_{start}',
+        disabled=True if locked else ['Day'],
+        key=f'editor_{start}_{hashlib.sha1(json.dumps(selected,sort_keys=True).encode()).hexdigest()[:12]}',
         column_config={names[cat]: st.column_config.SelectboxColumn(names[cat],options=[labels[cat][rid] for rid in selected[cat]],required=True)
                        for cat in cats})
     choices={}
@@ -289,50 +428,176 @@ with first:
             else:
                 approve_menu(start.isoformat())
                 st.success('Approved plan locked! Daily journal may now read it.')
-    st.subheader('🛒 Shopping list preview')
+    st.subheader('🛒 Einkaufsliste — organized for German supermarkets')
     shopping=shopping_list(menu,catalog,resolutions=load_reviews(menu.week_start))
-    st.dataframe(pd.DataFrame(shopping['items']),hide_index=True,use_container_width=True)
-    st.warning(f"{len(shopping['needs_review'])} unresolved ingredient entries · {shopping['reviewed']} reviewed. Cooked/raw weights still require purchase-state checking.") if shopping['needs_review'] else st.success('All ambiguous entries reviewed. Verify raw/cooked conversions before purchasing.')
-    with st.expander('Needs review'):
-        st.dataframe(pd.DataFrame(shopping['needs_review']),hide_index=True,use_container_width=True)
-    with st.expander('Resolve shopping list ingredients',expanded=False):
-        st.caption('Choose skip (e.g. optional ingredient) or replace with one exact ingredient, quantity and preparation state. Saved corrections are separate from your approved weekly menu.')
-        pending=shopping['needs_review']
-        if pending:
-            data=[{'ID':x['review_id'],'Recipe':x['recipe'],'Original':x['ingredient'],
-                   'Action':'pending','Name':'','Quantity':0.0,'Unit':'g','State':'as_served'} for x in pending]
-            reviewed_table=st.data_editor(pd.DataFrame(data),hide_index=True,num_rows='fixed',
-                disabled=['ID','Recipe','Original'],key=f'shopping_review_{start}',
-                column_config={'Action':st.column_config.SelectboxColumn('Action',options=['pending','skip','replace']),
-                               'Unit':st.column_config.SelectboxColumn('Unit',options=['g','kg','ml','l','un']),
-                               'State':st.column_config.SelectboxColumn('State',options=['raw','cooked','drained','as_served'])})
-            if st.button('Save shopping resolutions',key=f'save_review_{start}'):
+    market=shopping['supermarket']
+    unresolved=shopping['review_groups']
+    st.caption('Consolidated for two people. Products are grouped by supermarket aisle; '
+               'raw/cooked values remain separate until a conversion is verified.')
+    k1,k2,k3=st.columns(3)
+    k1.metric('Distinct products',len(market))
+    k2.metric('Choices to review',len(unresolved))
+    k3.metric('Cooked/raw checks',shopping['conversion_count'])
+    if unresolved:
+        st.warning(f'{len(unresolved)} ingredient decisions still need your attention. '
+                   'You can resolve matching occurrences together below.')
+    elif shopping['conversion_count']:
+        st.info('Ingredient choices resolved. Some products still need raw/cooked '
+                'purchase-weight conversion; no quantities were invented.')
+    else:
+        st.success('No unresolved ingredients or raw/cooked conflicts remain.')
+
+    # Only show market-facing rows, not technical person/hash/audit fields.
+    from src.journal_core.grocery import SECTIONS
+    for section in SECTIONS:
+        aisle=[item for item in market if item['section']==section]
+        if not aisle:
+            continue
+        with st.expander(f'{section} · {len(aisle)} products',expanded=True):
+            view=pd.DataFrame([{'Product':x['label'],'To buy':x['quantity_display'],
+                                'Attention':x['note']} for x in aisle])
+            st.dataframe(view,hide_index=True,use_container_width=True)
+
+    with st.expander(f'🧩 Resolve ingredients · {len(unresolved)} groups',expanded=bool(unresolved)):
+        st.caption('Types are separated: substitute an alternative, split a mixture, include/skip optional items, '
+                   'or specify quantities for an incomplete recipe. One saved choice applies to both people and matching days.')
+        if unresolved:
+            type_labels={'mixed_ingredients':'🥕 Mixed ingredients — decide percentages',
+                         'alternative':'🔁 Alternative — choose a product',
+                         'optional':'☑ Optional — include or skip',
+                         'prepared_dish':'🍲 Prepared dish — review recipe components',
+                         'missing_quantity':'⚖️ Missing quantity',
+                         'ingredient_choice':'🔍 Product/quantity choice',
+                         'fruit_choice':'🍎 Choose the fruit'}
+            grouped={kind:[g for g in unresolved if g['kind']==kind]
+                     for kind in type_labels}
+            for kind,members in grouped.items():
+                if members:
+                    st.caption(f'{type_labels[kind]}: {len(members)}')
+            ids={g['group_id']:g for g in unresolved}
+            group_id=st.selectbox('Ingredient needing attention',list(ids),
+                format_func=lambda gid:f"{type_labels.get(ids[gid]['kind'],'Review')} · {ids[gid]['ingredient']} ({ids[gid]['count']} uses)",
+                key=f'v05_review_group_{start}')
+            group=ids[group_id]
+            st.markdown(f"**Source description:** {group['ingredient']}")
+            st.caption(f"Seen in {group['recipes']}. Original per-person portions remain unchanged.")
+            action_labels={
+                'mixed_ingredients':['Split by percentages','Use one ingredient instead','Specify a complete replacement','Skip (already stocked)'],
+                'alternative':['Choose one ingredient','Split by percentages','Specify a complete replacement','Skip (already stocked)'],
+                'optional':['Skip (not needed)','Choose to include','Specify a complete replacement'],
+                'prepared_dish':['Specify a complete replacement','Skip (already stocked)'],
+                'missing_quantity':['Specify a complete replacement','Skip (already stocked)'],
+                'ingredient_choice':['Choose one ingredient','Specify a complete replacement','Skip (already stocked)'],
+                'fruit_choice':['Choose one ingredient','Specify a complete replacement'],
+            }
+            action_options=action_labels.get(group['kind'],action_labels['ingredient_choice'])
+            if not group['can_choose']:
+                action_options=[a for a in action_options if a not in ('Choose one ingredient','Split by percentages','Choose to include','Use one ingredient instead')]
+            action=st.radio('What does this recipe mean?',action_options,
+                key=f'v05_review_action_{start}_{group_id}',horizontal=True)
+            resolution=None
+            if action=='Split by percentages':
+                parts=group['choices']
+                if len(parts)<2 or len(parts)>6:
+                    st.warning('Please specify component ingredients and amounts using a complete replacement.')
+                else:
+                    st.caption('Enter how to distribute the source quantity. The total MUST equal 100% (not guessed).')
+                    cols=st.columns(len(parts))
+                    values=[]
+                    for i,(col,name) in enumerate(zip(cols,parts)):
+                        with col:
+                            share=st.number_input(f'{name} (%)',min_value=0.0,max_value=100.0,
+                                value=round(100/len(parts),2) if i<len(parts)-1 else round(100-round(100/len(parts),2)*(len(parts)-1),2),
+                                step=5.0,key=f'v05_part_{group_id}_{i}')
+                            values.append({'name':name,'percent':share})
+                    total_share=sum(p['percent'] for p in values)
+                    if abs(total_share-100)>0.001:st.warning(f'Total: {total_share:g}% · adjust to exactly 100%.')
+                    resolution={'action':'split','parts':values}
+            elif action in ('Choose one ingredient','Choose to include','Use one ingredient instead'):
+                choices=group['choices'] or ['fruta','banana','maca','laranja']
+                selected_name=st.selectbox('Product to buy',choices,key=f'v05_choice_{start}_{group_id}')
+                other_name=st.text_input('Or type a different exact product (optional)',
+                                         key=f'v05_other_{start}_{group_id}')
+                resolution={'action':'choose','name':other_name or selected_name}
+            elif action=='Specify a complete replacement':
+                cc1,cc2,cc3=st.columns(3)
+                with cc1: name=st.text_input('Product',key=f'v05_name_{start}_{group_id}')
+                with cc2: qty=st.number_input('Quantity for EACH source occurrence',min_value=0.0,step=1.0,key=f'v05_qty_{start}_{group_id}')
+                with cc3: unit=st.selectbox('Unit',['g','kg','ml','l','un'],key=f'v05_unit_{start}_{group_id}')
+                state=st.selectbox('Ingredient state',['as_served','raw','cooked','drained'],key=f'v05_state_{start}_{group_id}')
+                st.caption('This quantity is per occurrence BEFORE individual portion scaling. '
+                           'For a homemade prepared meal, list its actual components separately in the source recipe for accurate nutrition.')
+                resolution={'action':'replace','name':name,'quantity':qty,'unit':unit,'state':state}
+            else:resolution={'action':'skip'}
+            if st.button('✓ Apply this choice to all matching recipes',type='primary',key=f'v05_apply_{start}_{group_id}'):
                 try:
                     decisions=load_reviews(menu.week_start)
-                    for _,entry in reviewed_table.iterrows():
-                        action=entry['Action']
-                        if action=='pending':continue
-                        decisions[entry['ID']]={'action':action} if action=='skip' else {
-                            'action':'replace','name':str(entry['Name']),
-                            'quantity':float(entry['Quantity']),'unit':str(entry['Unit']),'state':str(entry['State'])}
+                    decisions[group_id]=resolution
                     save_reviews(menu.week_start,decisions)
-                    st.success('Saved. Reload the page to recalculate the shopping list.')
+                    st.rerun()
                 except (ValueError,OSError,TypeError) as exc:st.error(str(exc))
-        if st.button('Reset ALL shopping resolutions for this week',key=f'reset_review_{start}'):
-            save_reviews(menu.week_start,{})
-            st.info('Review decisions cleared; reload to review unresolved entries again.')
-    st.download_button('Download shopping list (.md)',as_markdown(shopping),
-                       file_name=f'shopping_{start}.md',mime='text/markdown')
-    st.download_button('Download consolidated items (.csv)',as_csv(shopping),
-                       file_name=f'shopping_{start}.csv',mime='text/csv')
-    st.download_button('Download full audit (.json)',json.dumps(shopping,ensure_ascii=False,indent=2),
-                       file_name=f'shopping_audit_{start}.json',mime='application/json')
+        else:st.success('No ingredient choices remain unresolved.')
+        with st.expander('Manage saved ingredient decisions'):
+            stored=load_reviews(menu.week_start)
+            st.caption(f'{len(stored)} saved decisions for this week.')
+            if stored:
+                chosen=st.selectbox('Remove a saved decision',list(stored),
+                                    format_func=lambda gid:f'{gid}: {stored[gid]["action"]}',key=f'v05_review_remove_{start}')
+                if st.button('Remove selected decision',key=f'v05_review_rm_{start}'):
+                    del stored[chosen]
+                    save_reviews(menu.week_start,stored)
+                    st.rerun()
+    if shopping['conversion_needed']:
+        with st.expander(f'⚖️ Convert cooked/drained weights to raw purchases ({len(shopping["conversion_needed"])} products)',expanded=True):
+            st.caption('Use a measured batch or a published food-specific yield. '
+                       'The app applies it to every matching ingredient after you confirm it; '
+                       'no generic conversion is assumed. Cooked yield can be greater or smaller than raw weight.')
+            conversion_rows=shopping['conversion_needed']
+            names={row['ingredient']:row for row in conversion_rows}
+            selected_food=st.selectbox('Product',list(names),format_func=lambda n:names[n]['label'],key=f'v05_yield_food_{start}')
+            selected_row=names[selected_food]
+            pending_states=[x.split('(')[-1].rstrip(')') for x in selected_row['pending_states']]
+            selected_state=st.selectbox('Prepared state to convert',sorted(set(pending_states)),key=f'v05_yield_state_{start}')
+            st.info(f'Current breakdown: {selected_row["quantity_display"]}')
+            if selected_row['unit']!='g' or selected_state=='unknown':
+                st.warning('This entry cannot yet be converted reliably. The source needs a known food preparation state and gram-based quantities. Review the original recipe first.')
+            with st.form(f'v05_yield_{start}_{selected_food}_{selected_state}'):
+                yc1,yc2=st.columns(2)
+                with yc1: raw_g=st.number_input('Raw purchase weight (g)',min_value=1.0,value=100.0,step=10.0)
+                with yc2: prepared_g=st.number_input(f'{selected_state.title()} usable weight (g)',min_value=1.0,value=250.0,step=10.0)
+                method=st.text_input('Preparation method',placeholder='e.g. simmered in water, measured after draining')
+                source=st.text_input('Evidence / source',placeholder='e.g. weighed at home 2026-11-08, or exact USDA table reference')
+                acknowledge=st.checkbox('These weights describe the same food and preparation method')
+                submit=st.form_submit_button('Save this yield and automatically recalculate purchases',
+                                             disabled=not acknowledge or selected_row['unit']!='g' or selected_state=='unknown')
+            if submit:
+                try:
+                    saved_yield=save_yield({'product':selected_food,'from_state':selected_state,
+                        'raw_grams':raw_g,'prepared_grams':prepared_g,'method':method,'source':source})
+                    st.success(f"Saved reviewed yield: {saved_yield['factor']:.3f} g {selected_state} per g raw")
+                    st.rerun()
+                except (ValueError,OSError) as exc:st.error(str(exc))
+    else:
+        st.caption('No unresolved cooking/purchase weight conversions.')
+    download_md,download_csv=st.columns(2)
+    with download_md:
+        st.download_button('📋 Download supermarket checklist (.md)',as_markdown(shopping),
+                           file_name=f'shopping_{start}.md',mime='text/markdown',
+                           use_container_width=True)
+    with download_csv:
+        st.download_button('📑 Download aisle-organized list (.csv)',as_csv(shopping),
+                           file_name=f'shopping_{start}.csv',mime='text/csv',
+                           use_container_width=True)
+    with st.expander('Advanced: shopping audit data (for debugging only)',expanded=False):
+        st.download_button('Download full shopping audit (.json)',
+                           json.dumps(shopping,ensure_ascii=False,indent=2),
+                           file_name=f'shopping_audit_{start}.json',mime='application/json')
     st.subheader('📊 Verified nutrition preview')
     try:
         nutrition=week_nutrition(menu,catalog)
     except (OSError,ValueError) as exc:
         nutrition=None
-        st.info(f'No verified nutrition reference yet: {exc}. Add USDA foods or labels in Nutrition setup.')
+        st.info(f'No verified nutrition reference yet: {exc}. Add USDA foods or labels in Food reference.')
     if nutrition is not None:
         data=[]
         for day in nutrition['days']:
@@ -365,5 +630,5 @@ with first:
                     if suggestion['status']=='blocked':
                         st.info('The optimizer is blocked until all chosen ingredients have verified nutritional coverage.')
                 else:
-                    st.warning('Choose this person’s activity classification in Nutrition setup first.')
+                    st.warning('Choose this person’s activity classification in Nutrition goals first.')
             except (OSError,ValueError) as exc:st.warning(str(exc))

@@ -1,3 +1,14 @@
+# CrewAI Journal Core v0.5 — Revised planner and nutrition goals
+
+This update adds reversible weekly-plan management, guided individualized nutrition target estimates, ingredient-type-aware shopping reviews, user-approved percentage splits, and source-tracked cooking yield conversions. See [docs/PLANNER_V05.md](docs/PLANNER_V05.md). Existing v0.4 functionality remains in place.
+
+# CrewAI Journal Core v0.4 — Grocery and recipe UX
+
+The new photo-card recipe picker and German-aisle shopping/review flow are
+explained in [docs/SHOPPING_AND_RECIPE_UX_V04.md](docs/SHOPPING_AND_RECIPE_UX_V04.md).
+This is an update of v0.3; your SQLite database, approved menus, private
+nutrition references and training configuration remain unchanged.
+
 # CrewAI Journal — Core v0.2 upgrade
 
 This **incremental upgrade** replaces selected `src/journal_core/` Python modules from v0.1 and adds a **local web planner**, automatic calendar-based training progression, conservative nutrition subtotals and a reviewable shopping-list exporter. It does not run or alter your legacy `journal_v3.py` or `tools.py`, `.env`, Obsidian notes, Google setup or NewsCollector.

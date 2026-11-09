@@ -17,6 +17,18 @@ def review_id(day:int|None, recipe:str, person:str, raw:str) -> str:
     return hashlib.sha256(value.encode('utf-8')).hexdigest()[:16]
 
 
+def group_review_id(raw: str) -> str:
+    """One decision for the same ingredient expression throughout a week.
+
+    Quantities are intentionally removed so 100 g tomato/spinach and 140 g
+    tomato/spinach can share a *choice* but keep their own source amounts.
+    """
+    import re
+    text = re.sub(r'^\s*\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|un\.?|unidades?)?\s*', '', raw, flags=re.I)
+    text = key(text)
+    return hashlib.sha256(('group-v04:'+text).encode('utf-8')).hexdigest()[:16]
+
+
 def review_file(week_start:str)->Path:
     d=date.fromisoformat(week_start)
     if d.weekday()!=0:
@@ -26,8 +38,30 @@ def review_file(week_start:str)->Path:
 
 def validate_resolution(resolution:dict)->dict:
     action=resolution.get('action','pending')
-    if action not in {'pending','skip','replace'}:
-        raise ValueError('Shopping decision must be pending, skip or replace')
+    if action not in {'pending','skip','replace','choose','split'}:
+        raise ValueError('Shopping decision must be pending, skip, choose or replace')
+    if action=='split':
+        parts=resolution.get('parts')
+        if not isinstance(parts,list) or not 2<=len(parts)<=6:
+            raise ValueError('Split requires two to six named ingredients')
+        result=[]
+        for part in parts:
+            name=key(str(part.get('name','')))
+            try: percent=float(part.get('percent'))
+            except (TypeError,ValueError): raise ValueError('Each split needs a numeric percentage') from None
+            if not name or '/' in name or len(name)>160 or not 0<percent<=100:
+                raise ValueError('Each split must have one ingredient and a percentage above zero')
+            result.append({'name':name,'percent':percent})
+        if len({p['name'] for p in result})!=len(result):
+            raise ValueError('Split ingredient names must be distinct')
+        if abs(sum(p['percent'] for p in result)-100)>0.001:
+            raise ValueError('Split percentages must total exactly 100%')
+        return {'action':'split','parts':result}
+    if action=='choose':
+        name=key(str(resolution.get('name','')))
+        if not name or '/' in name or len(name)>160:
+            raise ValueError('Choose one exact ingredient name (no slash/alternatives)')
+        return {'action':'choose','name':name}
     if action!='replace':
         return {'action':action}
     name=key(str(resolution.get('name','')))

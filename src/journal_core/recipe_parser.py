@@ -11,9 +11,10 @@ from .models import Ingredient, Recipe
 from .paths import recipe_paths
 
 HEADER_RE = re.compile(r"^(#{1,3})\s+(.+?)\s*$", re.M)
-RECIPE_RE = re.compile(r"^(\d{2})\.\s+(.+?)\s*$")
+RECIPE_RE = re.compile(r"^(\d{2,})\.\s+(.+?)\s*$")
 PORTION_RE = re.compile(r"^\s*\*\*(Você|Esposa):\*\*\s*(.+?)\s*$", re.M)
 FIELD_RE = re.compile(r"\*\*(Modo de preparo|Organização(?: e conservação)?|Quando usar|Categoria|Tempo(?: no domingo| na hora| no jantar| no horário do almoço)?):\*\*\s*([^\n]*?)(?=\s+\*\*[^\n]+?:\*\*|$)", re.M)
+IMAGE_RE = re.compile(r"!\[[^\]]*\]\((https?://[^\s)]+(?:\([^)]*\)[^\s)]*)*)\)", re.I)
 QUANTITY_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?|½|¼|¾)\s*(kg|g|ml|l|unidades?|unid\.?|colheres?|xícaras?)?\b\s*(.*)$", re.I)
 
 
@@ -118,6 +119,7 @@ def parse_recipe_file(path: Path, category: str) -> list[Recipe]:
             source_start_line=start_line, source_end_line=end_line,
             portions=portions,
             ingredients={p: parse_ingredients(v, category) for p, v in portions.items()},
+            image_url=(IMAGE_RE.search(segment).group(1) if IMAGE_RE.search(segment) else None),
             preparation=details.get("Modo de preparo"),
             organization=details.get("Organização") or details.get("Organização e conservação"),
             details=details, markdown=f"### {number:02d}. {title}\n\n{segment}",
