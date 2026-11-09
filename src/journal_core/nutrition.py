@@ -12,7 +12,8 @@ import unicodedata
 from .models import Recipe
 from .recipe_parser import get_recipe
 
-DEFAULT_REFERENCE = Path(__file__).resolve().parents[2] / 'config' / 'nutrition_reference_starter.csv'
+STARTER_REFERENCE = Path(__file__).resolve().parents[2] / 'config' / 'nutrition_reference_starter.csv'
+DEFAULT_REFERENCE = None
 
 
 def normalize(name: str) -> str:
@@ -39,16 +40,19 @@ def key(name: str) -> str:
 
 def reference_file() -> Path:
     import settings
-    return settings.configured_path('NUTRITION_REFERENCE_FILE', DEFAULT_REFERENCE)
+    return settings.configured_path('NUTRITION_REFERENCE_FILE', settings.JOURNAL_STATE_DIR / 'verified_nutrition.csv')
 
 
 def load_reference(path: Path | None = None) -> dict[tuple[str, str], dict]:
+    require_verified = path is None
     path = path or reference_file()
     rows = {}
     if not path.is_file():
-        raise FileNotFoundError(f'Nutrition reference CSV missing: {path}')
+        raise FileNotFoundError(f'Verified nutrition reference not yet available: {path}. Import reviewed USDA records or labels first.')
     with path.open(encoding='utf-8-sig', newline='') as file:
         for row in csv.DictReader(file):
+            if require_verified and not (row.get('source') or '').startswith(('USDA_FDC:', 'LABEL:')):
+                raise ValueError('Nutrition reference includes unverified/demo sources. Use only reviewed USDA or product-label mappings.')
             name = key(row['ingredient'])
             measurement = row.get('measurement_state','as_served').strip()
             if measurement not in {'raw','cooked','drained','as_served'}:

@@ -1,2 +1,2 @@
-"""Deterministic, offline journal core (phase 1)."""
-__version__ = "0.1.0"
+"""Deterministic CrewAI Journal core; optional verified food-data retrieval."""
+__version__ = "0.3.0"

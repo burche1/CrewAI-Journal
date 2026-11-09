@@ -11,7 +11,7 @@ from src.journal_core import state
 from src.journal_core.recipe_parser import load_catalog, get_recipe, split_portion_ingredients
 from src.journal_core.schedule import (CYCLE,anchor_training,week_for_date,pause_training,resume_training,get_schedule)
 from src.journal_core.shopping import shopping_list,as_csv,as_markdown
-from src.journal_core.nutrition import week_nutrition, load_reference,recipe_nutrition
+from src.journal_core.nutrition import week_nutrition, load_reference,recipe_nutrition, STARTER_REFERENCE
 from src.journal_core.weekly import create_menu
 
 
@@ -75,12 +75,12 @@ class CoreV02Tests(unittest.TestCase):
 
     def test_macro_subtotals_warn_on_missing_items(self):
         r=get_recipe(self.catalog,'breakfast:01')
-        result=recipe_nutrition(r,'person_a',reference=load_reference())
+        result=recipe_nutrition(r,'person_a',reference=load_reference(STARTER_REFERENCE))
         self.assertGreater(result['known_subtotal']['kcal'],0)
         self.assertTrue(result['matched_items']<=result['total_items'])
         selection={category:[row.id for row in rows[:7]] for category,rows in self.catalog.items()}
         menu=create_menu(date(2026,11,9),self.catalog,selection)
-        totals=week_nutrition(menu,self.catalog)
+        totals=week_nutrition(menu,self.catalog,reference=load_reference(STARTER_REFERENCE))
         self.assertEqual(len(totals['days']),7)
         self.assertFalse(totals['days'][0]['persons']['person_a']['complete'])
         self.assertIn('NOT validated',totals['warning'])
